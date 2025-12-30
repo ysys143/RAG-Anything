@@ -131,16 +131,16 @@ python scripts/raganything_openai_postgres_demo.py
 
 ```bash
 # 현재 상태 확인 (dry-run)
-python scripts/cleanup_rag_storage.py --dry-run
+python scripts/cleanup.py --dry-run
 
 # 데이터만 삭제 (테이블 구조 유지)
-python scripts/cleanup_rag_storage.py
+python scripts/cleanup.py
 
 # 테이블 완전 삭제
-python scripts/cleanup_rag_storage.py --drop-tables
+python scripts/cleanup.py --drop-tables
 
 # 로컬 rag_storage 폴더도 삭제
-python scripts/cleanup_rag_storage.py --include-local
+python scripts/cleanup.py --include-local
 ```
 
 ## 쿼리 모드

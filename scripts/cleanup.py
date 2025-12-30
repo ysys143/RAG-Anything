@@ -5,7 +5,7 @@ Safely removes all indexed data from PostgreSQL storage.
 Does NOT drop tables - only truncates data for reindexing.
 
 Usage:
-    python scripts/cleanup_rag_storage.py [--drop-tables] [--dry-run]
+    python scripts/cleanup.py [--drop-tables] [--dry-run]
 
 Options:
     --drop-tables   Drop tables completely (requires reinitialization)
