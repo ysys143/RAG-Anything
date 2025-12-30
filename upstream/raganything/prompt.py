@@ -11,82 +11,101 @@ from typing import Any
 
 PROMPTS: dict[str, Any] = {}
 
+# JSON formatting instructions (shared across all analysis prompts)
+JSON_FORMAT_INSTRUCTIONS = """
+CRITICAL JSON FORMATTING RULES:
+1. Return ONLY valid JSON - no markdown code blocks, no backticks, no explanations outside JSON
+2. All backslashes must be escaped: use \\\\ instead of \\
+3. For LaTeX: \\\\alpha, \\\\beta, \\\\frac{{a}}{{b}}, etc.
+4. All quotes inside strings must be escaped: use \\" for literal quotes
+5. No trailing commas after the last item in objects or arrays
+6. No line breaks inside string values - use \\n for newlines
+7. Start your response with {{ and end with }}"""
+
 # System prompts for different analysis types
 PROMPTS["IMAGE_ANALYSIS_SYSTEM"] = (
-    "You are an expert image analyst. Provide detailed, accurate descriptions."
+    "You are an expert image analyst. Provide detailed, accurate descriptions. "
+    "Always respond with valid JSON only - no markdown, no code blocks."
 )
 PROMPTS["IMAGE_ANALYSIS_FALLBACK_SYSTEM"] = (
-    "You are an expert image analyst. Provide detailed analysis based on available information."
+    "You are an expert image analyst. Provide detailed analysis based on available information. "
+    "Always respond with valid JSON only - no markdown, no code blocks."
 )
 PROMPTS["TABLE_ANALYSIS_SYSTEM"] = (
-    "You are an expert data analyst. Provide detailed table analysis with specific insights."
+    "You are an expert data analyst. Provide detailed table analysis with specific insights. "
+    "Always respond with valid JSON only - no markdown, no code blocks."
 )
 PROMPTS["EQUATION_ANALYSIS_SYSTEM"] = (
-    "You are an expert mathematician. Provide detailed mathematical analysis."
+    "You are an expert mathematician. Provide detailed mathematical analysis. "
+    "Always respond with valid JSON only - no markdown, no code blocks. "
+    "Remember to double-escape all LaTeX backslashes in JSON strings."
 )
 PROMPTS["GENERIC_ANALYSIS_SYSTEM"] = (
-    "You are an expert content analyst specializing in {content_type} content."
+    "You are an expert content analyst specializing in {content_type} content. "
+    "Always respond with valid JSON only - no markdown, no code blocks."
 )
 
 # Image analysis prompt template
 PROMPTS[
     "vision_prompt"
-] = """Please analyze this image in detail and provide a JSON response with the following structure:
+] = """Analyze this image and return a JSON object with this exact structure:
 
 {{
-    "detailed_description": "A comprehensive and detailed visual description of the image following these guidelines:
-    - Describe the overall composition and layout
-    - Identify all objects, people, text, and visual elements
-    - Explain relationships between elements
-    - Note colors, lighting, and visual style
-    - Describe any actions or activities shown
-    - Include technical details if relevant (charts, diagrams, etc.)
-    - Always use specific names instead of pronouns",
+    "detailed_description": "comprehensive visual description here",
     "entity_info": {{
         "entity_name": "{entity_name}",
         "entity_type": "image",
-        "summary": "concise summary of the image content and its significance (max 100 words)"
+        "summary": "concise summary (max 100 words)"
     }}
 }}
 
-Additional context:
+Guidelines for detailed_description:
+- Describe overall composition and layout
+- Identify all objects, people, text, and visual elements
+- Explain relationships between elements
+- Note colors, lighting, and visual style
+- Describe any actions or activities shown
+- Include technical details if relevant (charts, diagrams, etc.)
+- Always use specific names instead of pronouns
+
+Image Information:
 - Image Path: {image_path}
 - Captions: {captions}
 - Footnotes: {footnotes}
-
-Focus on providing accurate, detailed visual analysis that would be useful for knowledge retrieval."""
+""" + JSON_FORMAT_INSTRUCTIONS
 
 # Image analysis prompt with context support
 PROMPTS[
     "vision_prompt_with_context"
-] = """Please analyze this image in detail, considering the surrounding context. Provide a JSON response with the following structure:
+] = """Analyze this image considering the surrounding context and return a JSON object with this exact structure:
 
 {{
-    "detailed_description": "A comprehensive and detailed visual description of the image following these guidelines:
-    - Describe the overall composition and layout
-    - Identify all objects, people, text, and visual elements
-    - Explain relationships between elements and how they relate to the surrounding context
-    - Note colors, lighting, and visual style
-    - Describe any actions or activities shown
-    - Include technical details if relevant (charts, diagrams, etc.)
-    - Reference connections to the surrounding content when relevant
-    - Always use specific names instead of pronouns",
+    "detailed_description": "comprehensive visual description with context references here",
     "entity_info": {{
         "entity_name": "{entity_name}",
         "entity_type": "image",
-        "summary": "concise summary of the image content, its significance, and relationship to surrounding content (max 100 words)"
+        "summary": "concise summary with context relationship (max 100 words)"
     }}
 }}
+
+Guidelines for detailed_description:
+- Describe overall composition and layout
+- Identify all objects, people, text, and visual elements
+- Explain relationships between elements and surrounding context
+- Note colors, lighting, and visual style
+- Describe any actions or activities shown
+- Include technical details if relevant (charts, diagrams, etc.)
+- Reference connections to the surrounding content
+- Always use specific names instead of pronouns
 
 Context from surrounding content:
 {context}
 
-Image details:
+Image Information:
 - Image Path: {image_path}
 - Captions: {captions}
 - Footnotes: {footnotes}
-
-Focus on providing accurate, detailed visual analysis that incorporates the context and would be useful for knowledge retrieval."""
+""" + JSON_FORMAT_INSTRUCTIONS
 
 # Image analysis prompt with text fallback
 PROMPTS["text_prompt"] = """Based on the following image information, provide analysis:
@@ -100,176 +119,188 @@ Footnotes: {footnotes}
 # Table analysis prompt template
 PROMPTS[
     "table_prompt"
-] = """Please analyze this table content and provide a JSON response with the following structure:
+] = """Analyze this table and return a JSON object with this exact structure:
 
 {{
-    "detailed_description": "A comprehensive analysis of the table including:
-    - Table structure and organization
-    - Column headers and their meanings
-    - Key data points and patterns
-    - Statistical insights and trends
-    - Relationships between data elements
-    - Significance of the data presented
-    Always use specific names and values instead of general references.",
+    "detailed_description": "comprehensive table analysis here",
     "entity_info": {{
         "entity_name": "{entity_name}",
         "entity_type": "table",
-        "summary": "concise summary of the table's purpose and key findings (max 100 words)"
+        "summary": "concise summary of table purpose and findings (max 100 words)"
     }}
 }}
 
-Table Information:
-Image Path: {table_img_path}
-Caption: {table_caption}
-Body: {table_body}
-Footnotes: {table_footnote}
+Guidelines for detailed_description:
+- Table structure and organization
+- Column headers and their meanings
+- Key data points and patterns
+- Statistical insights and trends
+- Relationships between data elements
+- Significance of the data presented
+- Always use specific names and values instead of general references
 
-Focus on extracting meaningful insights and relationships from the tabular data."""
+Table Information:
+- Image Path: {table_img_path}
+- Caption: {table_caption}
+- Body: {table_body}
+- Footnotes: {table_footnote}
+""" + JSON_FORMAT_INSTRUCTIONS
 
 # Table analysis prompt with context support
 PROMPTS[
     "table_prompt_with_context"
-] = """Please analyze this table content considering the surrounding context, and provide a JSON response with the following structure:
+] = """Analyze this table considering the surrounding context and return a JSON object with this exact structure:
 
 {{
-    "detailed_description": "A comprehensive analysis of the table including:
-    - Table structure and organization
-    - Column headers and their meanings
-    - Key data points and patterns
-    - Statistical insights and trends
-    - Relationships between data elements
-    - Significance of the data presented in relation to surrounding context
-    - How the table supports or illustrates concepts from the surrounding content
-    Always use specific names and values instead of general references.",
+    "detailed_description": "comprehensive table analysis with context references here",
     "entity_info": {{
         "entity_name": "{entity_name}",
         "entity_type": "table",
-        "summary": "concise summary of the table's purpose, key findings, and relationship to surrounding content (max 100 words)"
+        "summary": "concise summary with context relationship (max 100 words)"
     }}
 }}
+
+Guidelines for detailed_description:
+- Table structure and organization
+- Column headers and their meanings
+- Key data points and patterns
+- Statistical insights and trends
+- Relationships between data elements
+- Significance in relation to surrounding context
+- How the table supports or illustrates concepts from surrounding content
+- Always use specific names and values instead of general references
 
 Context from surrounding content:
 {context}
 
 Table Information:
-Image Path: {table_img_path}
-Caption: {table_caption}
-Body: {table_body}
-Footnotes: {table_footnote}
-
-Focus on extracting meaningful insights and relationships from the tabular data in the context of the surrounding content."""
+- Image Path: {table_img_path}
+- Caption: {table_caption}
+- Body: {table_body}
+- Footnotes: {table_footnote}
+""" + JSON_FORMAT_INSTRUCTIONS
 
 # Equation analysis prompt template
 PROMPTS[
     "equation_prompt"
-] = """Please analyze this mathematical equation and provide a JSON response with the following structure:
+] = """Analyze this mathematical equation and return a JSON object with this exact structure:
 
 {{
-    "detailed_description": "A comprehensive analysis of the equation including:
-    - Mathematical meaning and interpretation
-    - Variables and their definitions
-    - Mathematical operations and functions used
-    - Application domain and context
-    - Physical or theoretical significance
-    - Relationship to other mathematical concepts
-    - Practical applications or use cases
-    Always use specific mathematical terminology.",
+    "detailed_description": "comprehensive equation analysis here",
     "entity_info": {{
         "entity_name": "{entity_name}",
         "entity_type": "equation",
-        "summary": "concise summary of the equation's purpose and significance (max 100 words)"
+        "summary": "concise summary of equation purpose (max 100 words)"
     }}
 }}
 
-Equation Information:
-Equation: {equation_text}
-Format: {equation_format}
+Guidelines for detailed_description:
+- Mathematical meaning and interpretation
+- Variables and their definitions
+- Mathematical operations and functions used
+- Application domain and context
+- Physical or theoretical significance
+- Relationship to other mathematical concepts
+- Practical applications or use cases
+- Always use specific mathematical terminology
 
-Focus on providing mathematical insights and explaining the equation's significance."""
+Equation Information:
+- Equation: {equation_text}
+- Format: {equation_format}
+
+IMPORTANT: When writing LaTeX in JSON strings, double-escape all backslashes.
+Example: Write \\\\alpha instead of \\alpha, \\\\frac{{a}}{{b}} instead of \\frac{{a}}{{b}}
+""" + JSON_FORMAT_INSTRUCTIONS
 
 # Equation analysis prompt with context support
 PROMPTS[
     "equation_prompt_with_context"
-] = """Please analyze this mathematical equation considering the surrounding context, and provide a JSON response with the following structure:
+] = """Analyze this mathematical equation considering the surrounding context and return a JSON object with this exact structure:
 
 {{
-    "detailed_description": "A comprehensive analysis of the equation including:
-    - Mathematical meaning and interpretation
-    - Variables and their definitions in the context of surrounding content
-    - Mathematical operations and functions used
-    - Application domain and context based on surrounding material
-    - Physical or theoretical significance
-    - Relationship to other mathematical concepts mentioned in the context
-    - Practical applications or use cases
-    - How the equation relates to the broader discussion or framework
-    Always use specific mathematical terminology.",
+    "detailed_description": "comprehensive equation analysis with context references here",
     "entity_info": {{
         "entity_name": "{entity_name}",
         "entity_type": "equation",
-        "summary": "concise summary of the equation's purpose, significance, and role in the surrounding context (max 100 words)"
+        "summary": "concise summary with context relationship (max 100 words)"
     }}
 }}
+
+Guidelines for detailed_description:
+- Mathematical meaning and interpretation
+- Variables and their definitions in context
+- Mathematical operations and functions used
+- Application domain based on surrounding material
+- Physical or theoretical significance
+- Relationship to other mathematical concepts in context
+- Practical applications or use cases
+- How the equation relates to the broader discussion
+- Always use specific mathematical terminology
 
 Context from surrounding content:
 {context}
 
 Equation Information:
-Equation: {equation_text}
-Format: {equation_format}
+- Equation: {equation_text}
+- Format: {equation_format}
 
-Focus on providing mathematical insights and explaining the equation's significance within the broader context."""
+IMPORTANT: When writing LaTeX in JSON strings, double-escape all backslashes.
+Example: Write \\\\alpha instead of \\alpha, \\\\frac{{a}}{{b}} instead of \\frac{{a}}{{b}}
+""" + JSON_FORMAT_INSTRUCTIONS
 
 # Generic content analysis prompt template
 PROMPTS[
     "generic_prompt"
-] = """Please analyze this {content_type} content and provide a JSON response with the following structure:
+] = """Analyze this {content_type} content and return a JSON object with this exact structure:
 
 {{
-    "detailed_description": "A comprehensive analysis of the content including:
-    - Content structure and organization
-    - Key information and elements
-    - Relationships between components
-    - Context and significance
-    - Relevant details for knowledge retrieval
-    Always use specific terminology appropriate for {content_type} content.",
+    "detailed_description": "comprehensive content analysis here",
     "entity_info": {{
         "entity_name": "{entity_name}",
         "entity_type": "{content_type}",
-        "summary": "concise summary of the content's purpose and key points (max 100 words)"
+        "summary": "concise summary of content purpose (max 100 words)"
     }}
 }}
 
-Content: {content}
+Guidelines for detailed_description:
+- Content structure and organization
+- Key information and elements
+- Relationships between components
+- Context and significance
+- Relevant details for knowledge retrieval
+- Always use specific terminology appropriate for {content_type} content
 
-Focus on extracting meaningful information that would be useful for knowledge retrieval."""
+Content: {content}
+""" + JSON_FORMAT_INSTRUCTIONS
 
 # Generic content analysis prompt with context support
 PROMPTS[
     "generic_prompt_with_context"
-] = """Please analyze this {content_type} content considering the surrounding context, and provide a JSON response with the following structure:
+] = """Analyze this {content_type} content considering the surrounding context and return a JSON object with this exact structure:
 
 {{
-    "detailed_description": "A comprehensive analysis of the content including:
-    - Content structure and organization
-    - Key information and elements
-    - Relationships between components
-    - Context and significance in relation to surrounding content
-    - How this content connects to or supports the broader discussion
-    - Relevant details for knowledge retrieval
-    Always use specific terminology appropriate for {content_type} content.",
+    "detailed_description": "comprehensive content analysis with context references here",
     "entity_info": {{
         "entity_name": "{entity_name}",
         "entity_type": "{content_type}",
-        "summary": "concise summary of the content's purpose, key points, and relationship to surrounding context (max 100 words)"
+        "summary": "concise summary with context relationship (max 100 words)"
     }}
 }}
+
+Guidelines for detailed_description:
+- Content structure and organization
+- Key information and elements
+- Relationships between components
+- Context and significance in relation to surrounding content
+- How this content connects to or supports the broader discussion
+- Relevant details for knowledge retrieval
+- Always use specific terminology appropriate for {content_type} content
 
 Context from surrounding content:
 {context}
 
 Content: {content}
-
-Focus on extracting meaningful information that would be useful for knowledge retrieval and understanding the content's role in the broader context."""
+""" + JSON_FORMAT_INSTRUCTIONS
 
 # Modal chunk templates
 PROMPTS["image_chunk"] = """

@@ -33,8 +33,8 @@ from lightrag.utils import EmbeddingFunc, setup_logger
 
 from raganything import RAGAnything, RAGAnythingConfig
 
-# Setup logger
-setup_logger("lightrag", level="INFO")
+# Setup logger - DEBUG 레벨로 JSON 파싱 fallback 원인 확인 가능
+setup_logger("lightrag", level="DEBUG")
 
 # Configuration
 WORKING_DIR = os.getenv("WORKING_DIR", "./rag_storage")

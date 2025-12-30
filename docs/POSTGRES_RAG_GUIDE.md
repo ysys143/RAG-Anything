@@ -231,3 +231,7 @@ lightrag-server \
 ```
 
 **참고**: lightrag-server는 문서 쿼리만 지원. 멀티모달 문서 삽입은 Python 스크립트(RAG-Anything) 필요.
+
+## 관련 문서
+
+- [POSTGRES_MIGRATION.md](./POSTGRES_MIGRATION.md) - 데이터베이스 마이그레이션 가이드

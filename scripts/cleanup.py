@@ -1,15 +1,23 @@
 """
 RAG Storage Cleanup Script
 
-Safely removes all indexed data from PostgreSQL storage.
-Does NOT drop tables - only truncates data for reindexing.
+Safely removes all indexed data from PostgreSQL storage and local artifacts.
 
 Usage:
-    python scripts/cleanup.py [--drop-tables] [--dry-run]
+    python scripts/cleanup.py [options]
 
 Options:
-    --drop-tables   Drop tables completely (requires reinitialization)
-    --dry-run       Show what would be deleted without executing
+    --drop-tables       Drop tables completely (requires reinitialization)
+    --dry-run           Show what would be deleted without executing
+    --include-local     Also remove local rag_storage directory
+    --include-artifacts Also remove output/ and parsing artifacts
+    --all               Clean everything (DB + local + artifacts)
+
+Examples:
+    python scripts/cleanup.py                    # Truncate DB tables only
+    python scripts/cleanup.py --dry-run          # Preview what would be deleted
+    python scripts/cleanup.py --include-artifacts  # DB + output artifacts
+    python scripts/cleanup.py --all              # Full cleanup
 """
 
 import os
@@ -111,17 +119,45 @@ async def cleanup_age_graphs(conn, dry_run: bool = False):
         print(f"  Error cleaning graphs: {e}")
 
 
-async def cleanup_local_storage():
+def cleanup_local_storage(dry_run: bool = False):
     """Remove local rag_storage directory"""
     import shutil
 
     storage_dir = "./rag_storage"
     if os.path.exists(storage_dir):
-        print(f"\n[LOCAL] Removing {storage_dir}...")
-        shutil.rmtree(storage_dir)
-        print(f"  Removed: {storage_dir}")
+        if dry_run:
+            print(f"\n[LOCAL] Would remove: {storage_dir}")
+        else:
+            print(f"\n[LOCAL] Removing {storage_dir}...")
+            shutil.rmtree(storage_dir)
+            print(f"  Removed: {storage_dir}")
     else:
         print(f"\n[LOCAL] {storage_dir} does not exist")
+
+
+def cleanup_output_artifacts(dry_run: bool = False):
+    """Remove output directory and parsing artifacts"""
+    import shutil
+
+    # Directories to clean
+    artifact_dirs = [
+        "./output",           # MinerU/Docling parsing output
+        "./rag_storage",      # LightRAG local storage (if not using PG)
+    ]
+
+    print("\n[ARTIFACTS] Cleaning output and parsing artifacts...")
+
+    for dir_path in artifact_dirs:
+        if os.path.exists(dir_path):
+            if dry_run:
+                # Count files
+                file_count = sum(len(files) for _, _, files in os.walk(dir_path))
+                print(f"  [DRY-RUN] Would remove: {dir_path} ({file_count} files)")
+            else:
+                shutil.rmtree(dir_path)
+                print(f"  Removed: {dir_path}")
+        else:
+            print(f"  Skip (not exists): {dir_path}")
 
 
 async def main():
@@ -132,7 +168,16 @@ async def main():
                         help="Show what would be deleted")
     parser.add_argument("--include-local", action="store_true",
                         help="Also remove local rag_storage directory")
+    parser.add_argument("--include-artifacts", action="store_true",
+                        help="Also remove output/ and parsing artifacts")
+    parser.add_argument("--all", action="store_true",
+                        help="Clean everything (DB + local + artifacts)")
     args = parser.parse_args()
+
+    # --all enables all cleanup options
+    if args.all:
+        args.include_local = True
+        args.include_artifacts = True
 
     print("=" * 60)
     print("RAG Storage Cleanup")
@@ -189,7 +234,11 @@ async def main():
 
         # Cleanup local storage
         if args.include_local:
-            await cleanup_local_storage()
+            cleanup_local_storage(args.dry_run)
+
+        # Cleanup output artifacts
+        if args.include_artifacts:
+            cleanup_output_artifacts(args.dry_run)
 
         await conn.close()
 
