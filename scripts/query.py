@@ -5,8 +5,10 @@ Usage:
     # 단일 질의
     python scripts/query.py "EZIS 시스템의 로그인 프로세스는?"
 
+    # 스트리밍 응답
+    python scripts/query.py "Oracle 연결 설정 방법" --stream
+
     # 쿼리 모드 지정
-    python scripts/query.py "Oracle 연결 설정 방법" --mode local
     python scripts/query.py "시스템 아키텍처 설명" --mode global
 
     # 대화형 모드
@@ -23,9 +25,11 @@ Prerequisites:
 
 import os
 import sys
+import signal
 import asyncio
 import argparse
-from typing import Optional
+from typing import Optional, AsyncIterator, Union
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 
@@ -63,12 +67,56 @@ DEFAULT_SYSTEM_PROMPT = """당신은 DBMS 모니터링 및 튜닝 전문기업 �
 답변은 한국어로 작성하며, 기술 용어는 필요시 영문을 병기합니다."""
 
 
+# Graceful shutdown handling
+class GracefulShutdown:
+    """Graceful shutdown handler for async operations"""
+
+    def __init__(self):
+        self.shutdown_event = asyncio.Event()
+        self._rag: Optional[RAGAnything] = None
+
+    def register_rag(self, rag: RAGAnything):
+        """Register RAG instance for cleanup"""
+        self._rag = rag
+
+    async def cleanup(self):
+        """Cleanup resources"""
+        if self._rag:
+            try:
+                await self._rag.finalize_storages()
+            except Exception:
+                pass
+
+    def trigger_shutdown(self):
+        """Trigger shutdown event"""
+        self.shutdown_event.set()
+
+
+# Global shutdown handler
+_shutdown_handler = GracefulShutdown()
+
+
+def setup_signal_handlers(loop: asyncio.AbstractEventLoop):
+    """Setup signal handlers for graceful shutdown"""
+
+    def signal_handler(sig, frame):
+        print("\n\n중단 요청 수신. 정리 중...")
+        _shutdown_handler.trigger_shutdown()
+        # Schedule cleanup
+        loop.call_soon_threadsafe(
+            lambda: asyncio.create_task(_shutdown_handler.cleanup())
+        )
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+
 async def llm_model_func(
     prompt,
     system_prompt=None,
     history_messages=[],
     **kwargs,
-) -> str:
+) -> Union[str, AsyncIterator[str]]:
     return await openai_complete_if_cache(
         LLM_MODEL,
         prompt,
@@ -86,7 +134,7 @@ async def vision_model_func(
     image_data=None,
     messages=None,
     **kwargs,
-) -> str:
+) -> Union[str, AsyncIterator[str]]:
     if messages:
         return await openai_complete_if_cache(
             VISION_MODEL,
@@ -134,8 +182,9 @@ embedding_func = EmbeddingFunc(
 )
 
 
-async def create_rag_instance(use_vlm: bool = True) -> RAGAnything:
-    """RAGAnything 인스턴스 생성 및 초기화"""
+@asynccontextmanager
+async def create_rag_context(use_vlm: bool = True):
+    """RAGAnything 컨텍스트 매니저 (자동 정리)"""
     config = RAGAnythingConfig(
         working_dir=WORKING_DIR,
     )
@@ -153,12 +202,21 @@ async def create_rag_instance(use_vlm: bool = True) -> RAGAnything:
         },
     )
 
+    # Register for graceful shutdown
+    _shutdown_handler.register_rag(rag)
+
     # LightRAG 초기화
     init_result = await rag._ensure_lightrag_initialized()
     if not init_result.get("success", False):
         raise RuntimeError(f"LightRAG 초기화 실패: {init_result.get('error', 'Unknown error')}")
 
-    return rag
+    try:
+        yield rag
+    finally:
+        try:
+            await rag.finalize_storages()
+        except Exception:
+            pass
 
 
 async def execute_query(
@@ -167,7 +225,8 @@ async def execute_query(
     mode: str = "mix",
     system_prompt: Optional[str] = None,
     vlm_enhanced: bool = True,
-) -> str:
+    stream: bool = False,
+) -> Union[str, AsyncIterator[str]]:
     """쿼리 실행"""
     effective_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
 
@@ -176,21 +235,43 @@ async def execute_query(
         mode=mode,
         system_prompt=effective_prompt,
         vlm_enhanced=vlm_enhanced,
+        stream=stream,
     )
 
     return result
 
 
-async def interactive_mode(rag: RAGAnything, mode: str, system_prompt: Optional[str], vlm_enhanced: bool):
+async def print_streaming_response(response_iterator: AsyncIterator[str]):
+    """스트리밍 응답 출력"""
+    try:
+        async for chunk in response_iterator:
+            if _shutdown_handler.shutdown_event.is_set():
+                print("\n[중단됨]")
+                break
+            print(chunk, end="", flush=True)
+        print()  # 마지막 줄바꿈
+    except asyncio.CancelledError:
+        print("\n[취소됨]")
+
+
+async def interactive_mode(
+    rag: RAGAnything,
+    mode: str,
+    system_prompt: Optional[str],
+    vlm_enhanced: bool,
+    stream: bool,
+):
     """대화형 쿼리 모드"""
     print("\n" + "=" * 60)
-    print("EZIS RAG 대화형 모드")
+    print("위데이터랩 RAG 대화형 모드")
     print("=" * 60)
     print(f"쿼리 모드: {mode}")
     print(f"VLM 활성화: {vlm_enhanced}")
+    print(f"스트리밍: {stream}")
     print("\n명령어:")
     print("  /mode <local|global|hybrid|naive|mix>  - 쿼리 모드 변경")
     print("  /vlm                                    - VLM 토글")
+    print("  /stream                                 - 스트리밍 토글")
     print("  /clear                                  - 화면 정리")
     print("  /help                                   - 도움말")
     print("  /quit 또는 /exit                        - 종료")
@@ -198,10 +279,13 @@ async def interactive_mode(rag: RAGAnything, mode: str, system_prompt: Optional[
 
     current_mode = mode
     current_vlm = vlm_enhanced
+    current_stream = stream
 
-    while True:
+    while not _shutdown_handler.shutdown_event.is_set():
         try:
-            user_input = input("\n질문> ").strip()
+            user_input = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: input("\n질문> ").strip()
+            )
         except (EOFError, KeyboardInterrupt):
             print("\n종료합니다.")
             break
@@ -227,6 +311,9 @@ async def interactive_mode(rag: RAGAnything, mode: str, system_prompt: Optional[
             elif cmd == "vlm":
                 current_vlm = not current_vlm
                 print(f"VLM {'활성화' if current_vlm else '비활성화'}")
+            elif cmd == "stream":
+                current_stream = not current_stream
+                print(f"스트리밍 {'활성화' if current_stream else '비활성화'}")
             elif cmd == "clear":
                 os.system("clear" if os.name != "nt" else "cls")
             elif cmd == "help":
@@ -241,7 +328,9 @@ async def interactive_mode(rag: RAGAnything, mode: str, system_prompt: Optional[
             continue
 
         # 쿼리 실행
-        print("\n검색 중...")
+        if not current_stream:
+            print("\n검색 중...")
+
         try:
             result = await execute_query(
                 rag=rag,
@@ -249,10 +338,17 @@ async def interactive_mode(rag: RAGAnything, mode: str, system_prompt: Optional[
                 mode=current_mode,
                 system_prompt=system_prompt,
                 vlm_enhanced=current_vlm,
+                stream=current_stream,
             )
+
             print("\n" + "-" * 60)
-            print(result)
+            if current_stream and hasattr(result, "__aiter__"):
+                await print_streaming_response(result)
+            else:
+                print(result)
             print("-" * 60)
+        except asyncio.CancelledError:
+            print("\n[쿼리 취소됨]")
         except Exception as e:
             print(f"오류 발생: {e}")
 
@@ -262,47 +358,57 @@ async def single_query(
     mode: str,
     system_prompt: Optional[str],
     vlm_enhanced: bool,
+    stream: bool,
 ):
     """단일 쿼리 실행"""
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다")
 
-    rag = await create_rag_instance(use_vlm=vlm_enhanced)
-
-    try:
+    async with create_rag_context(use_vlm=vlm_enhanced) as rag:
         result = await execute_query(
             rag=rag,
             query=query,
             mode=mode,
             system_prompt=system_prompt,
             vlm_enhanced=vlm_enhanced,
+            stream=stream,
         )
-        print(result)
-    finally:
-        try:
-            await rag.finalize_storages()
-        except Exception:
-            pass
+
+        if stream and hasattr(result, "__aiter__"):
+            await print_streaming_response(result)
+        else:
+            print(result)
 
 
 async def interactive_session(
     mode: str,
     system_prompt: Optional[str],
     vlm_enhanced: bool,
+    stream: bool,
 ):
     """대화형 세션 실행"""
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다")
 
-    rag = await create_rag_instance(use_vlm=vlm_enhanced)
+    async with create_rag_context(use_vlm=vlm_enhanced) as rag:
+        await interactive_mode(rag, mode, system_prompt, vlm_enhanced, stream)
 
-    try:
-        await interactive_mode(rag, mode, system_prompt, vlm_enhanced)
-    finally:
-        try:
-            await rag.finalize_storages()
-        except Exception:
-            pass
+
+async def cancel_all_tasks(loop: asyncio.AbstractEventLoop):
+    """Cancel all pending tasks gracefully"""
+    tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+
+    if not tasks:
+        return
+
+    for task in tasks:
+        task.cancel()
+
+    # Wait for all tasks to be cancelled with timeout
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Give tasks a moment to clean up
+    await asyncio.sleep(0.1)
 
 
 def main():
@@ -332,6 +438,11 @@ def main():
         help="대화형 모드 실행",
     )
     parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="스트리밍 응답 활성화",
+    )
+    parser.add_argument(
         "--system-prompt",
         "-s",
         type=str,
@@ -346,26 +457,56 @@ def main():
 
     args = parser.parse_args()
 
-    if args.interactive:
-        asyncio.run(
-            interactive_session(
-                mode=args.mode,
-                system_prompt=args.system_prompt,
-                vlm_enhanced=not args.no_vlm,
+    # Create event loop and setup signal handlers
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    setup_signal_handlers(loop)
+
+    try:
+        if args.interactive:
+            loop.run_until_complete(
+                interactive_session(
+                    mode=args.mode,
+                    system_prompt=args.system_prompt,
+                    vlm_enhanced=not args.no_vlm,
+                    stream=args.stream,
+                )
             )
-        )
-    elif args.query:
-        asyncio.run(
-            single_query(
-                query=args.query,
-                mode=args.mode,
-                system_prompt=args.system_prompt,
-                vlm_enhanced=not args.no_vlm,
+        elif args.query:
+            loop.run_until_complete(
+                single_query(
+                    query=args.query,
+                    mode=args.mode,
+                    system_prompt=args.system_prompt,
+                    vlm_enhanced=not args.no_vlm,
+                    stream=args.stream,
+                )
             )
-        )
-    else:
-        parser.print_help()
-        sys.exit(1)
+        else:
+            parser.print_help()
+            sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n중단됨.")
+    finally:
+        # Cleanup: finalize storages first
+        try:
+            loop.run_until_complete(_shutdown_handler.cleanup())
+        except Exception:
+            pass
+
+        # Cancel all remaining tasks to prevent "Task was destroyed" warnings
+        try:
+            loop.run_until_complete(cancel_all_tasks(loop))
+        except Exception:
+            pass
+
+        # Shutdown async generators
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+
+        loop.close()
 
 
 if __name__ == "__main__":
