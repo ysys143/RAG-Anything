@@ -226,8 +226,18 @@ async def execute_query(
     system_prompt: Optional[str] = None,
     vlm_enhanced: bool = True,
     stream: bool = False,
-) -> Union[str, AsyncIterator[str]]:
-    """쿼리 실행"""
+    return_images: bool = False,
+) -> Union[str, AsyncIterator[str], dict]:
+    """쿼리 실행
+
+    Args:
+        return_images: True이면 참조된 이미지 경로도 함께 반환
+
+    Returns:
+        str: 기본 응답
+        AsyncIterator: stream=True
+        dict: return_images=True, {"response": str, "referenced_images": list[str]}
+    """
     effective_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
 
     result = await rag.aquery(
@@ -236,6 +246,7 @@ async def execute_query(
         system_prompt=effective_prompt,
         vlm_enhanced=vlm_enhanced,
         stream=stream,
+        return_images=return_images,
     )
 
     return result
@@ -359,6 +370,7 @@ async def single_query(
     system_prompt: Optional[str],
     vlm_enhanced: bool,
     stream: bool,
+    show_images: bool = False,
 ):
     """단일 쿼리 실행"""
     if not OPENAI_API_KEY:
@@ -372,10 +384,19 @@ async def single_query(
             system_prompt=system_prompt,
             vlm_enhanced=vlm_enhanced,
             stream=stream,
+            return_images=show_images,
         )
 
         if stream and hasattr(result, "__aiter__"):
             await print_streaming_response(result)
+        elif show_images and isinstance(result, dict):
+            # 참조 이미지와 함께 출력
+            print(result["response"])
+            if result.get("referenced_images"):
+                print("\n" + "-" * 40)
+                print("참조된 이미지:")
+                for img_path in result["referenced_images"]:
+                    print(f"  - {img_path}")
         else:
             print(result)
 
@@ -454,6 +475,11 @@ def main():
         action="store_true",
         help="VLM(Vision Language Model) 비활성화",
     )
+    parser.add_argument(
+        "--show-images",
+        action="store_true",
+        help="답변에 참조된 이미지 경로 표시",
+    )
 
     args = parser.parse_args()
 
@@ -480,6 +506,7 @@ def main():
                     system_prompt=args.system_prompt,
                     vlm_enhanced=not args.no_vlm,
                     stream=args.stream,
+                    show_images=args.show_images,
                 )
             )
         else:
