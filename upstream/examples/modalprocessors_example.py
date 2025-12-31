@@ -25,7 +25,7 @@ def get_llm_model_func(api_key: str, base_url: str = None):
         system_prompt=None,
         history_messages=[],
         **kwargs: openai_complete_if_cache(
-            "gpt-4o-mini",
+            "gpt-4.1-mini",
             prompt,
             system_prompt=system_prompt,
             history_messages=history_messages,
@@ -43,7 +43,7 @@ def get_vision_model_func(api_key: str, base_url: str = None):
         history_messages=[],
         image_data=None,
         **kwargs: openai_complete_if_cache(
-            "gpt-4o",
+            "gpt-4.1",
             "",
             system_prompt=None,
             history_messages=[],
@@ -70,7 +70,7 @@ def get_vision_model_func(api_key: str, base_url: str = None):
         )
         if image_data
         else openai_complete_if_cache(
-            "gpt-4o-mini",
+            "gpt-4.1-mini",
             prompt,
             system_prompt=system_prompt,
             history_messages=history_messages,
@@ -186,7 +186,7 @@ async def initialize_rag(api_key: str, base_url: str = None):
         system_prompt=None,
         history_messages=[],
         **kwargs: openai_complete_if_cache(
-            "gpt-4o-mini",
+            "gpt-4.1-mini",
             prompt,
             system_prompt=system_prompt,
             history_messages=history_messages,

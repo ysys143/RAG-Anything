@@ -200,7 +200,7 @@ async def demo_insert_content_list(
         # Define LLM model function
         def llm_model_func(prompt, system_prompt=None, history_messages=[], **kwargs):
             return openai_complete_if_cache(
-                "gpt-4o-mini",
+                "gpt-4.1-mini",
                 prompt,
                 system_prompt=system_prompt,
                 history_messages=history_messages,
@@ -215,7 +215,7 @@ async def demo_insert_content_list(
         ):
             if image_data:
                 return openai_complete_if_cache(
-                    "gpt-4o",
+                    "gpt-4.1",
                     "",
                     system_prompt=None,
                     history_messages=[],
