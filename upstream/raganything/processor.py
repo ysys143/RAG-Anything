@@ -1344,23 +1344,47 @@ class ProcessorMixin:
         try:
             current_doc_status = await self.lightrag.doc_status.get_by_id(doc_id)
             if current_doc_status:
+                # metadata JSONB 컬럼에 multimodal_processed 저장
+                current_metadata = current_doc_status.get("metadata", {}) or {}
+                if isinstance(current_metadata, str):
+                    import json
+                    current_metadata = json.loads(current_metadata) if current_metadata else {}
+
+                updated_metadata = {
+                    **current_metadata,
+                    "multimodal_processed": True,
+                    "multimodal_completed_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                }
+
                 await self.lightrag.doc_status.upsert(
                     {
                         doc_id: {
                             **current_doc_status,
-                            "multimodal_processed": True,
+                            "metadata": updated_metadata,
                             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
                         }
                     }
                 )
                 await self.lightrag.doc_status.index_done_callback()
-                self.logger.debug(
-                    f"Marked multimodal content processing as complete for document {doc_id}"
+                self.logger.info(
+                    f"Marked multimodal processing complete for document {doc_id}"
                 )
         except Exception as e:
             self.logger.warning(
                 f"Error marking multimodal processing as complete for document {doc_id}: {e}"
             )
+
+    def _get_multimodal_processed_from_status(self, doc_status: dict) -> bool:
+        """Extract multimodal_processed flag from doc_status metadata."""
+        # metadata JSONB에서 읽기
+        metadata = doc_status.get("metadata", {}) or {}
+        if isinstance(metadata, str):
+            import json
+            try:
+                metadata = json.loads(metadata) if metadata else {}
+            except:
+                metadata = {}
+        return metadata.get("multimodal_processed", False)
 
     async def is_document_fully_processed(self, doc_id: str) -> bool:
         """
@@ -1378,7 +1402,7 @@ class ProcessorMixin:
                 return False
 
             text_processed = doc_status.get("status") == DocStatus.PROCESSED
-            multimodal_processed = doc_status.get("multimodal_processed", False)
+            multimodal_processed = self._get_multimodal_processed_from_status(doc_status)
 
             return text_processed and multimodal_processed
 
@@ -1410,7 +1434,7 @@ class ProcessorMixin:
                 }
 
             text_processed = doc_status.get("status") == DocStatus.PROCESSED
-            multimodal_processed = doc_status.get("multimodal_processed", False)
+            multimodal_processed = self._get_multimodal_processed_from_status(doc_status)
             fully_processed = text_processed and multimodal_processed
 
             return {
@@ -1527,6 +1551,8 @@ class ProcessorMixin:
             )
 
         self.logger.info(f"Document {file_path} processing complete!")
+
+        return {"doc_id": doc_id, "file_path": file_path}
 
     async def process_document_complete_lightrag_api(
         self,
