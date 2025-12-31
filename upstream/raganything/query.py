@@ -334,7 +334,7 @@ class QueryMixin:
 
         # Extract parameters
         stream = kwargs.pop("stream", False)
-        return_images = kwargs.pop("return_images", False)
+        return_images = kwargs.pop("return_images", True)
 
         # Ensure LightRAG is initialized
         await self._ensure_lightrag_initialized()
