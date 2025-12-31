@@ -11,7 +11,7 @@ RAG-Anything + LightRAG를 PostgreSQL 백엔드로 운영하는 방법을 설명
 │                    RAG-Anything                             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
 │  │ MinerU      │  │ OpenAI      │  │ Vision Model        │ │
-│  │ Parser      │  │ LLM/Embed   │  │ (gpt-4o)            │ │
+│  │ Parser      │  │ LLM/Embed   │  │ (gpt-4.1)            │ │
 │  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘ │
 │         │                │                     │            │
 │         └────────────────┼─────────────────────┘            │
@@ -133,15 +133,26 @@ python scripts/raganything_openai_postgres_demo.py
 # 현재 상태 확인 (dry-run)
 python scripts/cleanup.py --dry-run
 
-# 데이터만 삭제 (테이블 구조 유지)
+# DB 데이터만 삭제 (테이블 구조 유지)
 python scripts/cleanup.py
 
-# 테이블 완전 삭제
+# 테이블 완전 삭제 (임베딩 모델 변경 시)
 python scripts/cleanup.py --drop-tables
 
-# 로컬 rag_storage 폴더도 삭제
-python scripts/cleanup.py --include-local
+# output/ 파싱 아티팩트도 삭제
+python scripts/cleanup.py --include-artifacts
+
+# 전체 정리 (DB + rag_storage + output)
+python scripts/cleanup.py --all
 ```
+
+| 옵션 | 삭제 대상 |
+|-----|----------|
+| (기본) | DB 테이블 데이터 (TRUNCATE) |
+| `--drop-tables` | DB 테이블 구조까지 삭제 |
+| `--include-local` | rag_storage/ 디렉토리 |
+| `--include-artifacts` | output/ 파싱 결과물 |
+| `--all` | 위 모두 포함 |
 
 ## 쿼리 모드
 
