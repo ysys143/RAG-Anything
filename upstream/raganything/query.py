@@ -99,7 +99,7 @@ class QueryMixin:
 
     async def aquery(
         self, query: str, mode: str = "mix", system_prompt: str | None = None, **kwargs
-    ) -> str:
+    ):
         """
         Pure text query - directly calls LightRAG's query functionality
 
@@ -111,9 +111,14 @@ class QueryMixin:
                 - vlm_enhanced: bool, default True when vision_model_func is available.
                   If True, will parse image paths in retrieved context and replace them
                   with base64 encoded images for VLM processing.
+                - stream: bool, if True returns an async iterator for streaming
+                - return_images: bool, if True returns dict with referenced images
 
         Returns:
-            str: Query result
+            str or AsyncIterator or dict: Query result
+                - str: default response
+                - AsyncIterator: if stream=True
+                - dict: if return_images=True, {"response": str, "referenced_images": list[str]}
         """
         if self.lightrag is None:
             raise ValueError(
@@ -312,9 +317,13 @@ class QueryMixin:
             system_prompt: Optional system prompt to include
             **kwargs: Other query parameters
                 - stream: bool, if True returns an async iterator for streaming
+                - return_images: bool, if True returns dict with response and referenced images
 
         Returns:
-            str or AsyncIterator: VLM query result (streaming if stream=True)
+            str or AsyncIterator or dict: VLM query result
+                - str: default response
+                - AsyncIterator: if stream=True
+                - dict: if return_images=True, {"response": str, "referenced_images": list[str]}
         """
         # Ensure VLM is available
         if not hasattr(self, "vision_model_func") or not self.vision_model_func:
@@ -323,8 +332,9 @@ class QueryMixin:
                 "Please provide a vision model function when initializing RAGAnything."
             )
 
-        # Extract stream parameter
+        # Extract parameters
         stream = kwargs.pop("stream", False)
+        return_images = kwargs.pop("return_images", False)
 
         # Ensure LightRAG is initialized
         await self._ensure_lightrag_initialized()
@@ -334,6 +344,8 @@ class QueryMixin:
         # Clear previous image cache
         if hasattr(self, "_current_images_base64"):
             delattr(self, "_current_images_base64")
+        if hasattr(self, "_current_image_paths"):
+            delattr(self, "_current_image_paths")
 
         # 1. Get original retrieval prompt (without generating final answer)
         query_param = QueryParam(mode=mode, only_need_prompt=True, **kwargs)
@@ -350,9 +362,12 @@ class QueryMixin:
             self.logger.info("No valid images found, falling back to normal query")
             # Fallback to normal query
             query_param = QueryParam(mode=mode, stream=stream, **kwargs)
-            return await self.lightrag.aquery(
+            result = await self.lightrag.aquery(
                 query, param=query_param, system_prompt=system_prompt
             )
+            if return_images and not stream:
+                return {"response": result, "referenced_images": []}
+            return result
 
         self.logger.info(f"Processed {images_found} images for VLM")
 
@@ -363,6 +378,15 @@ class QueryMixin:
 
         # 4. Call VLM for question answering
         result = await self._call_vlm_with_multimodal_content(messages, stream=stream)
+
+        # 5. Parse referenced images if requested (non-streaming only)
+        if return_images and not stream:
+            clean_response, referenced_images = self._parse_referenced_images(result)
+            self.logger.info(f"Referenced images: {len(referenced_images)}")
+            return {
+                "response": clean_response,
+                "referenced_images": referenced_images
+            }
 
         self.logger.info("VLM enhanced query completed")
         return result
@@ -549,6 +573,7 @@ class QueryMixin:
 
         # Initialize image cache
         self._current_images_base64 = []
+        self._current_image_paths = []
 
         # Enhanced regex pattern for matching image paths
         # Matches only the path ending with image file extensions
@@ -556,45 +581,32 @@ class QueryMixin:
             r"Image Path:\s*([^\r\n]*?\.(?:jpg|jpeg|png|gif|bmp|webp|tiff|tif))"
         )
 
-        # First, let's see what matches we find
         matches = re.findall(image_path_pattern, prompt)
-        self.logger.info(f"Found {len(matches)} image path matches in prompt")
+        self.logger.debug(f"Found {len(matches)} image path matches in prompt")
 
         def replace_image_path(match):
             nonlocal images_processed
 
             image_path = match.group(1).strip()
-            self.logger.debug(f"Processing image path: '{image_path}'")
 
             # Validate path format (basic check)
             if not image_path or len(image_path) < 3:
                 self.logger.warning(f"Invalid image path format: {image_path}")
                 return match.group(0)  # Keep original
 
-            # Use utility function to validate image file
-            self.logger.debug(f"Calling validate_image_file for: {image_path}")
             is_valid = validate_image_file(image_path)
-            self.logger.debug(f"Validation result for {image_path}: {is_valid}")
 
             if not is_valid:
                 self.logger.warning(f"Image validation failed for: {image_path}")
                 return match.group(0)  # Keep original if validation fails
 
             try:
-                # Encode image to base64 using utility function
-                self.logger.debug(f"Attempting to encode image: {image_path}")
                 image_base64 = encode_image_to_base64(image_path)
                 if image_base64:
                     images_processed += 1
-                    # Save base64 to instance variable for later use
                     self._current_images_base64.append(image_base64)
-
-                    # Keep original path info and add VLM marker
-                    result = f"Image Path: {image_path}\n[VLM_IMAGE_{images_processed}]"
-                    self.logger.debug(
-                        f"Successfully processed image {images_processed}: {image_path}"
-                    )
-                    return result
+                    self._current_image_paths.append(image_path)
+                    return f"Image Path: {image_path}\n[VLM_IMAGE_{images_processed}]"
                 else:
                     self.logger.error(f"Failed to encode image: {image_path}")
                     return match.group(0)  # Keep original if encoding failed
@@ -669,11 +681,15 @@ class QueryMixin:
                     if remaining_text.strip():
                         content_parts.append({"type": "text", "text": remaining_text})
 
-        # Add user question
+        # Add user question with image reference instruction
         content_parts.append(
             {
                 "type": "text",
-                "text": f"\n\nUser Question: {user_query}\n\nPlease answer based on the context and images provided.",
+                "text": f"""\n\nUser Question: {user_query}
+
+Please answer based on the context and images provided.
+At the end of your answer, indicate which images you referenced using this format:
+[REFERENCED_IMAGES: 1, 3, 5] or [REFERENCED_IMAGES: none] if no images were helpful.""",
             }
         )
         base_system_prompt = "You are a helpful assistant that can analyze both text and image content to provide comprehensive answers."
@@ -693,6 +709,44 @@ class QueryMixin:
                 "content": content_parts,
             },
         ]
+
+    def _parse_referenced_images(self, response: str) -> tuple[str, list[str]]:
+        """
+        Parse VLM response to extract referenced image paths
+
+        Args:
+            response: VLM response text
+
+        Returns:
+            tuple: (cleaned response without tag, list of referenced image paths)
+        """
+        pattern = r'\[REFERENCED_IMAGES:\s*([^\]]+)\]'
+        match = re.search(pattern, response)
+
+        if not match:
+            # No reference tag found, return original response
+            return response, []
+
+        # Remove tag from response
+        clean_response = re.sub(pattern, '', response).strip()
+
+        # Parse image numbers
+        refs = match.group(1).strip()
+        if refs.lower() == 'none':
+            return clean_response, []
+
+        # Map numbers to paths
+        image_paths = getattr(self, '_current_image_paths', [])
+        referenced_paths = []
+
+        for num_str in refs.split(','):
+            num_str = num_str.strip()
+            if num_str.isdigit():
+                num = int(num_str)
+                if 0 < num <= len(image_paths):
+                    referenced_paths.append(image_paths[num - 1])
+
+        return clean_response, referenced_paths
 
     async def _call_vlm_with_multimodal_content(self, messages: List[Dict], stream: bool = False):
         """
