@@ -58,6 +58,7 @@ manuals/backup/
 TODO.md
 ignore_this.txt
 *.ignore.*
+memo
 
 # Project-specific files
 dickens*/
