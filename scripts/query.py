@@ -65,8 +65,8 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
 
 # OpenAI configuration (for embeddings)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
-EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "3072"))
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
 
 # Default system prompt (페르소나)
 DEFAULT_SYSTEM_PROMPT = """당신은 DBMS 모니터링 및 튜닝 전문기업 위데이터랩의 DBA 겸 고객지원 엔지니어입니다.
