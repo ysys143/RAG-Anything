@@ -46,9 +46,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # PostgreSQL with pgvector + Apache AGE
+  # PostgreSQL with pgvector + Apache AGE (pre-built image)
   postgres-rag:
-    image: docker-postgres-rag:latest
+    image: gzdaniel/postgres-for-rag:16.6
     container_name: ezis-postgres-rag
     restart: unless-stopped
     ports:
