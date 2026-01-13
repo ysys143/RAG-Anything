@@ -239,7 +239,7 @@ services:
       POSTGRES_DATABASE: ezis_rag
       # LLM (Gemini)
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3-flash-preview}
       # Embedding (OpenAI)
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}

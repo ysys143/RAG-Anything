@@ -1,7 +1,7 @@
 # Query Benchmark Results
 
 - **Date**: 2026-01-08 12:06:39
-- **Model**: gemini-3-flash-preview
+- **Model**: gemini-3-flash-preview-preview
 - **Runs per mode**: 3
 
 ## Query
