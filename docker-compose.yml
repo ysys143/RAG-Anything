@@ -1,0 +1,88 @@
+# EZIS RAG - Production Docker Compose
+# Full stack: FastAPI App + PostgreSQL (pgvector + Apache AGE)
+
+services:
+  # FastAPI Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ezis-rag-app:latest
+    container_name: ezis-rag-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-38000}:8000"
+    depends_on:
+      postgres-rag:
+        condition: service_healthy
+    environment:
+      # PostgreSQL connection (internal network)
+      POSTGRES_HOST: postgres-rag
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-pgvector}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pgvector}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-ezis_rag}
+      # LLM Configuration (Gemini)
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      # Embedding Configuration (OpenAI)
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      # Parser Configuration
+      PARSER: ${PARSER:-mineru}
+      PARSE_METHOD: ${PARSE_METHOD:-auto}
+      # Storage paths (inside container)
+      WORKING_DIR: /app/rag_storage
+      OUTPUT_DIR: /app/output
+    volumes:
+      - rag_storage:/app/rag_storage
+      - output_data:/app/output
+    networks:
+      - ezis-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # PostgreSQL with pgvector + Apache AGE (pre-built image)
+  postgres-rag:
+    image: gzdaniel/postgres-for-rag:16.6
+    container_name: ezis-postgres-rag
+    restart: unless-stopped
+    ports:
+      - "${DB_PORT:-35432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pgvector}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pgvector}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-ezis_rag}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init_postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pgvector} -d ${POSTGRES_DATABASE:-ezis_rag}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ezis-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+    name: ezis_postgres_data
+  rag_storage:
+    name: ezis_rag_storage
+  output_data:
+    name: ezis_output_data
+
+networks:
+  ezis-network:
+    name: ezis-network
+    driver: bridge
