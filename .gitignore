@@ -12,8 +12,9 @@ __pycache__/
 env/
 venv/
 
-*.env*
-.env_example
+.env
+.env.local
+.env.production
 
 # Build / Distribution
 dist/
@@ -52,6 +53,7 @@ examples/input/
 examples/output/
 output*/
 manuals/backup/
+backup/
 
 # Miscellaneous
 .DS_Store
@@ -79,5 +81,4 @@ memory-bank/
 # AI
 .claude/
 .cursor/
-CLAUDE.md
 2025-*.txt

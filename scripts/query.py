@@ -42,7 +42,13 @@ os.environ.setdefault("POSTGRES_USER", "pgvector")
 os.environ.setdefault("POSTGRES_PASSWORD", "pgvector")
 os.environ.setdefault("POSTGRES_DATABASE", "ezis_rag")
 
-from lightrag.llm.openai import openai_complete_if_cache, openai_embed
+import base64
+
+from google import genai
+from google.genai import types
+
+from lightrag.llm.gemini import gemini_model_complete
+from lightrag.llm.openai import openai_embed
 from lightrag.utils import EmbeddingFunc, setup_logger
 
 from raganything import RAGAnything, RAGAnythingConfig
@@ -53,12 +59,14 @@ setup_logger("lightrag", level="INFO")
 # Configuration
 WORKING_DIR = os.getenv("WORKING_DIR", "./rag_storage")
 
-# OpenAI configuration
+# Gemini configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
+
+# OpenAI configuration (for embeddings)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4.1-mini")
-VISION_MODEL = os.getenv("VISION_MODEL", "gpt-4.1")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
-EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "3072"))
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
 
 # Default system prompt (페르소나)
 DEFAULT_SYSTEM_PROMPT = """당신은 DBMS 모니터링 및 튜닝 전문기업 위데이터랩의 DBA 겸 고객지원 엔지니어입니다.
@@ -117,12 +125,12 @@ async def llm_model_func(
     history_messages=[],
     **kwargs,
 ) -> Union[str, AsyncIterator[str]]:
-    return await openai_complete_if_cache(
-        LLM_MODEL,
+    return await gemini_model_complete(
         prompt,
         system_prompt=system_prompt,
         history_messages=history_messages,
-        api_key=OPENAI_API_KEY,
+        api_key=GEMINI_API_KEY,
+        model_name=GEMINI_MODEL,
         **kwargs,
     )
 
@@ -135,40 +143,52 @@ async def vision_model_func(
     messages=None,
     **kwargs,
 ) -> Union[str, AsyncIterator[str]]:
+    """Gemini vision model function supporting text and image inputs."""
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    # Build content parts
+    contents = []
+
     if messages:
-        return await openai_complete_if_cache(
-            VISION_MODEL,
-            "",
-            system_prompt=None,
-            history_messages=[],
-            messages=messages,
-            api_key=OPENAI_API_KEY,
-            **kwargs,
-        )
+        # Handle pre-built messages format (convert from OpenAI format)
+        for msg in messages:
+            if msg is None:
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                contents.append(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if part.get("type") == "text":
+                        contents.append(part.get("text", ""))
+                    elif part.get("type") == "image_url":
+                        # Extract base64 from data URL
+                        url = part.get("image_url", {}).get("url", "")
+                        if url.startswith("data:"):
+                            b64_data = url.split(",", 1)[-1]
+                            image_bytes = base64.b64decode(b64_data)
+                            contents.append(
+                                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+                            )
     elif image_data:
-        return await openai_complete_if_cache(
-            VISION_MODEL,
-            "",
-            system_prompt=None,
-            history_messages=[],
-            messages=[
-                {"role": "system", "content": system_prompt} if system_prompt else None,
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
-                        },
-                    ],
-                },
-            ],
-            api_key=OPENAI_API_KEY,
-            **kwargs,
-        )
+        # Handle direct base64 image data
+        if system_prompt:
+            contents.append(system_prompt)
+        contents.append(prompt)
+        image_bytes = base64.b64decode(image_data)
+        contents.append(types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"))
     else:
+        # Text-only fallback
         return await llm_model_func(prompt, system_prompt, history_messages, **kwargs)
+
+    # Call Gemini API
+    response = await asyncio.to_thread(
+        client.models.generate_content,
+        model=GEMINI_MODEL,
+        contents=contents,
+    )
+
+    return response.text
 
 
 embedding_func = EmbeddingFunc(
@@ -195,6 +215,7 @@ async def create_rag_context(use_vlm: bool = True):
         vision_model_func=vision_model_func if use_vlm else None,
         embedding_func=embedding_func,
         lightrag_kwargs={
+            "llm_model_name": GEMINI_MODEL,
             "kv_storage": "PGKVStorage",
             "vector_storage": "PGVectorStorage",
             "graph_storage": "PGGraphStorage",
@@ -367,8 +388,8 @@ async def single_query(
     stream: bool,
 ):
     """단일 쿼리 실행"""
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다")
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다")
 
     async with create_rag_context(use_vlm=vlm_enhanced) as rag:
         result = await execute_query(
@@ -401,8 +422,8 @@ async def interactive_session(
     stream: bool,
 ):
     """대화형 세션 실행"""
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다")
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다")
 
     async with create_rag_context(use_vlm=vlm_enhanced) as rag:
         await interactive_mode(rag, mode, system_prompt, vlm_enhanced, stream)

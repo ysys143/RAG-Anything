@@ -118,8 +118,8 @@ async def vision_model_func(
 
 
 # Embedding configuration
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
-EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "3072"))
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
 
 # Embedding function (OpenAI)
 embedding_func = EmbeddingFunc(
